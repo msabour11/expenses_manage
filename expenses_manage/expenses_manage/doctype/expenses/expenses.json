@@ -15,10 +15,10 @@
   "account_currency",
   "exchange_rate",
   "amount_in_account_currency",
-  "section_break_49gbn",
   "exchange_rate_date",
-  "column_break_vg0d2",
-  "currency_exchange_link"
+  "currency_exchange_link",
+  "accounting_dimensions_section",
+  "dimension_col_break"
  ],
  "fields": [
   {
@@ -91,8 +91,10 @@
    "read_only": 1
   },
   {
-   "fieldname": "section_break_49gbn",
-   "fieldtype": "Section Break"
+   "collapsible": 1,
+   "fieldname": "accounting_dimensions_section",
+   "fieldtype": "Section Break",
+   "label": "Accounting Dimensions"
   },
   {
    "fieldname": "exchange_rate_date",
@@ -102,7 +104,7 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_break_vg0d2",
+   "fieldname": "dimension_col_break",
    "fieldtype": "Column Break"
   },
   {

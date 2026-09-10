@@ -2,12 +2,40 @@
 # For license information, please see license.txt
 
 import frappe
+from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
+    get_accounting_dimensions,
+)
+from erpnext.accounts.general_ledger import (
+    make_gl_entries,
+    make_reverse_gl_entries,
+)
+from erpnext.accounts.utils import get_balance_on
+from erpnext.controllers.accounts_controller import AccountsController
+from erpnext.setup.utils import get_exchange_rate
 from frappe import _
 from frappe.utils import flt
 
-from erpnext.accounts.general_ledger import make_gl_entries, make_reverse_gl_entries
-from erpnext.controllers.accounts_controller import AccountsController
-from erpnext.setup.utils import get_exchange_rate
+
+@frappe.whitelist()
+def get_account_balance(account, company, posting_date=None, date=None):
+    posting_date = posting_date or date
+    if not posting_date:
+        frappe.throw(_("Posting Date is required."))
+
+    account_details = frappe.get_cached_value(
+        "Account",
+        account,
+        ["company", "is_group", "disabled", "account_type"],
+        as_dict=True,
+    )
+    if not account_details or account_details.company != company:
+        frappe.throw(_("The selected account does not belong to this company."))
+    if account_details.is_group or account_details.disabled:
+        frappe.throw(_("The selected account is not available for payment."))
+    if account_details.account_type not in ("Bank", "Cash"):
+        frappe.throw(_("Account Paid From must be a Bank or Cash account."))
+
+    return get_balance_on(account=account, date=posting_date, company=company)
 
 
 class ExpensesEntry(AccountsController):
@@ -22,6 +50,10 @@ class ExpensesEntry(AccountsController):
         self.payment_type = "Expenses"
         self._set_payment_account_from_mode_of_payment()
         self._validate_payment_account()
+        if self.default_cost_center:
+            self._validate_cost_center(self.default_cost_center)
+        if self.default_project:
+            self._validate_project(self.default_project)
         self._validate_and_normalize_expense_rows()
         self._set_totals_and_exchange_rate()
         self.validate_company_in_accounting_dimension()
@@ -88,6 +120,7 @@ class ExpensesEntry(AccountsController):
         if not self.expenses:
             frappe.throw(_("Please add at least one expense line."))
 
+        accounting_dimensions = get_accounting_dimensions()
         for row in self.expenses:
             account = self._get_account(
                 row.account_paid_to, _("Row #{0}: Expense Account").format(row.idx)
@@ -121,12 +154,69 @@ class ExpensesEntry(AccountsController):
             row.cost_center = row.cost_center or self.default_cost_center
             if not row.cost_center:
                 frappe.throw(_("Row #{0}: Cost Center is required.").format(row.idx))
+            self._validate_cost_center(row.cost_center, row.idx)
+
+            row.project = row.project or self.default_project
+            if row.project:
+                self._validate_project(row.project, row.idx)
+
+            for dimension in accounting_dimensions:
+                row.set(dimension, row.get(dimension) or self.get(dimension))
 
             row.account_currency = self.company_currency
             row.exchange_rate = 1
             row.amount_in_account_currency = row.amount
             row.exchange_rate_date = None
             row.currency_exchange_link = None
+
+    def _validate_cost_center(self, cost_center, row_idx=None):
+        cost_center_details = frappe.get_cached_value(
+            "Cost Center",
+            cost_center,
+            ["company", "is_group", "disabled"],
+            as_dict=True,
+        )
+        prefix = _("Row {0}: ").format(row_idx) if row_idx else ""
+        if not cost_center_details:
+            frappe.throw(
+                _("{0}Cost Center {1} does not exist.").format(
+                    prefix, frappe.bold(cost_center)
+                )
+            )
+        if cost_center_details.company != self.company:
+            frappe.throw(
+                _("{0}Cost Center {1} does not belong to company {2}.").format(
+                    prefix, frappe.bold(cost_center), frappe.bold(self.company)
+                )
+            )
+        if cost_center_details.is_group:
+            frappe.throw(
+                _("{0}Cost Center {1} is a group. Select a leaf cost center.").format(
+                    prefix, frappe.bold(cost_center)
+                )
+            )
+        if cost_center_details.disabled:
+            frappe.throw(
+                _("{0}Cost Center {1} is disabled.").format(
+                    prefix, frappe.bold(cost_center)
+                )
+            )
+
+    def _validate_project(self, project, row_idx=None):
+        project_company = frappe.db.get_value("Project", project, "company")
+        prefix = _("Row {0}: ").format(row_idx) if row_idx else ""
+        if not project_company:
+            frappe.throw(
+                _("{0}Project {1} does not exist.").format(
+                    prefix, frappe.bold(project)
+                )
+            )
+        if project_company != self.company:
+            frappe.throw(
+                _("{0}Project {1} does not belong to company {2}.").format(
+                    prefix, frappe.bold(project), frappe.bold(self.company)
+                )
+            )
 
     def _set_totals_and_exchange_rate(self):
         self.total_debit = flt(
@@ -213,6 +303,7 @@ class ExpensesEntry(AccountsController):
                     "credit": self.paid_amount,
                     "credit_in_account_currency": self.paid_amount_in_account_currency,
                     "cost_center": self.default_cost_center,
+                    "project": self.default_project,
                     "account_currency": self.account_currency_from,
                 },
                 account_currency=self.account_currency_from,

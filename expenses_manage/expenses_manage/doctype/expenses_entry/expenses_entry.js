@@ -3,6 +3,8 @@
 
 frappe.ui.form.on("Expenses Entry", {
 	setup(frm) {
+		setup_accounting_dimensions(frm);
+
 		frm.set_query("mode_of_payment", () => ({
 			filters: { enabled: 1 },
 		}));
@@ -18,6 +20,10 @@ frappe.ui.form.on("Expenses Entry", {
 
 		frm.set_query("default_cost_center", () => ({
 			filters: { company: frm.doc.company, is_group: 0, disabled: 0 },
+		}));
+
+		frm.set_query("default_project", () => ({
+			filters: { company: frm.doc.company },
 		}));
 
 		frm.set_query("account_paid_to", "expenses", () => ({
@@ -63,14 +69,19 @@ frappe.ui.form.on("Expenses Entry", {
 	},
 
 	company(frm) {
-		frm.set_value({
+		const values = {
 			mode_of_payment: null,
 			account_paid_from: null,
 			account_currency_from: null,
 			default_cost_center: null,
+			default_project: null,
 			multi_currency: 0,
 			exchange_rate: 1,
+		};
+		(frm.expense_accounting_dimensions || []).forEach((dimension) => {
+			values[dimension] = null;
 		});
+		frm.set_value(values);
 		frm.clear_table("expenses");
 		frm.refresh_field("expenses");
 		calculate_totals(frm);
@@ -92,7 +103,12 @@ frappe.ui.form.on("Expenses Entry", {
 
 	account_paid_from(frm) {
 		if (!frm.doc.account_paid_from) {
-			frm.set_value({ account_currency_from: null, multi_currency: 0, exchange_rate: 1 });
+			frm.set_value({
+				account_currency_from: null,
+				account_balance_from: 0,
+				multi_currency: 0,
+				exchange_rate: 1,
+			});
 			return;
 		}
 
@@ -100,12 +116,14 @@ frappe.ui.form.on("Expenses Entry", {
 			const account_currency = r.message && r.message.account_currency;
 			frm.set_value("account_currency_from", account_currency).then(() => {
 				update_exchange_rate(frm);
+				update_account_balance(frm);
 			});
 		});
 	},
 
 	posting_date(frm) {
 		update_exchange_rate(frm);
+		update_account_balance(frm);
 	},
 
 	exchange_rate(frm) {
@@ -113,22 +131,24 @@ frappe.ui.form.on("Expenses Entry", {
 	},
 
 	default_cost_center(frm) {
-		(frm.doc.expenses || []).forEach((row) => {
-			if (!row.cost_center) {
-				frappe.model.set_value(
-					row.doctype,
-					row.name,
-					"cost_center",
-					frm.doc.default_cost_center,
-				);
-			}
-		});
+		set_default_in_blank_rows(frm, "cost_center", frm.doc.default_cost_center);
+	},
+
+	default_project(frm) {
+		set_default_in_blank_rows(frm, "project", frm.doc.default_project);
 	},
 });
 
 frappe.ui.form.on("Expenses", {
 	expenses_add(frm, cdt, cdn) {
-		frappe.model.set_value(cdt, cdn, "cost_center", frm.doc.default_cost_center);
+		const defaults = {
+			cost_center: frm.doc.default_cost_center,
+			project: frm.doc.default_project,
+		};
+		(frm.expense_accounting_dimensions || []).forEach((dimension) => {
+			defaults[dimension] = frm.doc[dimension];
+		});
+		frappe.model.set_value(cdt, cdn, defaults);
 	},
 
 	expenses_remove(frm) {
@@ -140,6 +160,32 @@ frappe.ui.form.on("Expenses", {
 	},
 });
 
+function setup_accounting_dimensions(frm) {
+	frappe.call({
+		method: "erpnext.accounts.doctype.accounting_dimension.accounting_dimension.get_dimensions",
+		callback(r) {
+			const dimensions = (r.message && r.message[0]) || [];
+			frm.expense_accounting_dimensions = dimensions.map(
+				(dimension) => dimension.fieldname
+			);
+
+			frm.expense_accounting_dimensions.forEach((dimension) => {
+				frm.cscript[dimension] = (doc, cdt, cdn) => {
+					erpnext.utils.copy_value_in_all_rows(doc, cdt, cdn, "expenses", dimension);
+				};
+			});
+		},
+	});
+}
+
+function set_default_in_blank_rows(frm, fieldname, value) {
+	(frm.doc.expenses || []).forEach((row) => {
+		if (!row[fieldname]) {
+			frappe.model.set_value(row.doctype, row.name, fieldname, value);
+		}
+	});
+}
+
 function calculate_totals(frm) {
 	const total = (frm.doc.expenses || []).reduce((sum, row) => sum + flt(row.amount), 0);
 	const rate = flt(frm.doc.exchange_rate) || 1;
@@ -148,7 +194,7 @@ function calculate_totals(frm) {
 	frm.set_value("paid_amount", total);
 	frm.set_value(
 		"paid_amount_in_account_currency",
-		frm.doc.multi_currency ? flt(total / rate) : total,
+		frm.doc.multi_currency ? flt(total / rate) : total
 	);
 }
 
@@ -191,4 +237,26 @@ function update_exchange_rate(frm) {
 			},
 		});
 	});
+}
+
+function update_account_balance(frm) {
+	if (!frm.doc.account_paid_from || !frm.doc.company || !frm.doc.posting_date) {
+		frm.set_value("account_balance_from", 0);
+		return;
+	}
+
+	frappe
+		.call({
+			method: "expenses_manage.expenses_manage.doctype.expenses_entry.expenses_entry.get_account_balance",
+			args: {
+				account: frm.doc.account_paid_from,
+				posting_date: frm.doc.posting_date,
+				company: frm.doc.company,
+			},
+		})
+		.then((r) => {
+			if (r.message !== undefined && frm.doc.account_paid_from) {
+				frm.set_value("account_balance_from", r.message);
+			}
+		});
 }

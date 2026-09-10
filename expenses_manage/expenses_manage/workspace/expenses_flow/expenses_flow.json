@@ -1,0 +1,60 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"AMIyR2odgH\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\">Expenses Flow</span>\",\"col\":12}},{\"id\":\"3PNV43jLLx\",\"type\":\"card\",\"data\":{\"card_name\":\"Expenses\",\"col\":4}}]",
+ "creation": "2026-09-10 16:02:17.284768",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "arrow-up-right",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Expenses Flow",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Expenses",
+   "link_count": 2,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Expenses Entry",
+   "link_count": 0,
+   "link_to": "Expenses Entry",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "dependencies": "GL Entry",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Expense Analysis",
+   "link_count": 0,
+   "link_to": "Expense Analysis",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-09-10 16:39:49.749365",
+ "modified_by": "Administrator",
+ "module": "Expenses Manage",
+ "name": "Expenses Flow",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "Accounting",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 28.0,
+ "shortcuts": [],
+ "title": "Expenses Flow"
+}
