@@ -9,6 +9,12 @@ frappe.query_reports["Expense Analysis"] = {
 			reqd: 1,
 		},
 		{
+			fieldname: "branch",
+			label: __("Branch"),
+			fieldtype: "Link",
+			options: "Branch",
+		},
+		{
 			fieldname: "from_date",
 			label: __("From Date"),
 			fieldtype: "Date",

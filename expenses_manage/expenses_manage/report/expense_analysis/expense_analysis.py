@@ -115,7 +115,7 @@ def get_data(filters):
             }
         )
 
-    for fieldname in ("cost_center", "project", "voucher_type"):
+    for fieldname in ("branch", "cost_center", "project", "voucher_type"):
         if filters.get(fieldname):
             conditions.append(f"gle.{fieldname} = %({fieldname})s")
             query_values[fieldname] = filters.get(fieldname)
