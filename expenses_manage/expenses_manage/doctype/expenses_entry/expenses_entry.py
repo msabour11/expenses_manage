@@ -16,6 +16,46 @@ from frappe import _
 from frappe.utils import flt
 
 
+def calculate_inclusive_taxes(gross_amount, tax_rows, precision=2):
+    """Return the net amount and tax allocations for a tax-inclusive amount."""
+    valid_tax_rows = [
+        tax for tax in tax_rows if flt(tax.get("rate")) and tax.get("account_head")
+    ]
+    if not valid_tax_rows:
+        return flt(gross_amount, precision), []
+
+    total_rate = sum(flt(tax.get("rate")) for tax in valid_tax_rows)
+    if total_rate <= -100:
+        frappe.throw(_("The total tax rate must be greater than -100%."))
+
+    gross_amount = flt(gross_amount, precision)
+    net_amount = flt(gross_amount / (1 + total_rate / 100), precision)
+    allocated_tax = 0.0
+    allocations = []
+
+    for index, tax in enumerate(valid_tax_rows):
+        rate = flt(tax.get("rate"))
+        if index == len(valid_tax_rows) - 1:
+            tax_amount = flt(gross_amount - net_amount - allocated_tax, precision)
+        else:
+            tax_amount = flt(net_amount * rate / 100, precision)
+
+        if not tax_amount:
+            continue
+
+        allocated_tax += tax_amount
+        allocations.append(
+            {
+                "account_head": tax.get("account_head"),
+                "description": tax.get("description"),
+                "rate": rate,
+                "tax_amount": tax_amount,
+            }
+        )
+
+    return net_amount, allocations
+
+
 @frappe.whitelist()
 def get_account_balance(account, company, posting_date=None, date=None):
     posting_date = posting_date or date
@@ -54,9 +94,117 @@ class ExpensesEntry(AccountsController):
             self._validate_cost_center(self.default_cost_center)
         if self.default_project:
             self._validate_project(self.default_project)
+        self.apply_custom_taxes()
         self._validate_and_normalize_expense_rows()
         self._set_totals_and_exchange_rate()
         self.validate_company_in_accounting_dimension()
+
+    def apply_custom_taxes(self):
+        """Split selected tax-inclusive expense rows into net and tax rows."""
+        if not self.custom_tax_template:
+            self._restore_gross_amounts()
+            self.custom_total_taxes_and_charges = 0
+            return
+
+        tax_rows = self._get_tax_template_rows()
+        if not any(
+            flt(tax.get("rate")) and tax.get("account_head") for tax in tax_rows
+        ):
+            frappe.throw(
+                _("Tax Template {0} has no tax lines with an account and rate.").format(
+                    frappe.bold(self.custom_tax_template)
+                )
+            )
+
+        # Always rebuild generated rows so recalculation is idempotent.
+        self.expenses = [
+            row for row in self.expenses if not row.get("custom_is_tax_row")
+        ]
+        accounting_dimensions = get_accounting_dimensions()
+        total_tax = 0.0
+
+        for row in list(self.expenses):
+            gross_amount = flt(row.get("custom_gross_amount"))
+
+            if not row.get("custom_tax_included"):
+                if gross_amount:
+                    row.amount = gross_amount
+                    row.custom_gross_amount = 0
+                continue
+
+            if not gross_amount:
+                gross_amount = flt(row.amount)
+                row.custom_gross_amount = gross_amount
+            if not gross_amount:
+                continue
+
+            precision = row.precision("amount")
+            net_amount, allocations = calculate_inclusive_taxes(
+                gross_amount, tax_rows, precision
+            )
+            row.amount = net_amount
+
+            for tax in allocations:
+                tax_amount = tax["tax_amount"]
+                total_tax += tax_amount
+                tax_row = {
+                    "account_paid_to": tax["account_head"],
+                    "amount": tax_amount,
+                    "cost_center": row.cost_center or self.default_cost_center,
+                    "project": row.project or self.default_project,
+                    "remarks": _("{0} @ {1}%").format(
+                        tax.get("description") or tax["account_head"], tax["rate"]
+                    ),
+                    "custom_tax_included": 0,
+                    "custom_is_tax_row": 1,
+                    "custom_gross_amount": 0,
+                }
+                for dimension in accounting_dimensions:
+                    tax_row[dimension] = row.get(dimension) or self.get(dimension)
+                self.append("expenses", tax_row)
+
+        self.custom_total_taxes_and_charges = flt(
+            total_tax, self.precision("custom_total_taxes_and_charges")
+        )
+
+    def _get_tax_template_rows(self):
+        try:
+            template = frappe.get_doc(
+                "Purchase Taxes and Charges Template", self.custom_tax_template
+            )
+        except frappe.DoesNotExistError:
+            frappe.throw(
+                _("Tax Template {0} not found.").format(
+                    frappe.bold(self.custom_tax_template)
+                )
+            )
+
+        if template.get("company") and template.company != self.company:
+            frappe.throw(
+                _("Tax Template {0} does not belong to company {1}.").format(
+                    frappe.bold(self.custom_tax_template), frappe.bold(self.company)
+                )
+            )
+
+        return [
+            {
+                "account_head": tax.account_head,
+                "rate": tax.rate,
+                "description": tax.description,
+            }
+            for tax in template.taxes
+        ]
+
+    def _restore_gross_amounts(self):
+        restored_rows = []
+        for row in self.expenses:
+            if row.get("custom_is_tax_row"):
+                continue
+            if flt(row.get("custom_gross_amount")):
+                row.amount = flt(row.custom_gross_amount, row.precision("amount"))
+                row.custom_gross_amount = 0
+            restored_rows.append(row)
+        self.expenses = restored_rows
 
     def on_submit(self):
         self._post_gl_entries()
@@ -125,7 +273,7 @@ class ExpensesEntry(AccountsController):
             account = self._get_account(
                 row.account_paid_to, _("Row #{0}: Expense Account").format(row.idx)
             )
-            if account.root_type != "Expense":
+            if not row.get("custom_is_tax_row") and account.root_type != "Expense":
                 frappe.throw(
                     _("Row #{0}: Account {1} must be an Expense account.").format(
                         row.idx, frappe.bold(row.account_paid_to)

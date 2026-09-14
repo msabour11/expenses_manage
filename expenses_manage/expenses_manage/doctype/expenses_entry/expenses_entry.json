@@ -32,6 +32,10 @@
   "default_cost_center",
   "dimension_col_break",
   "default_project",
+  "taxes_section",
+  "custom_tax_template",
+  "taxes_column_break",
+  "custom_total_taxes_and_charges",
   "expenses_section",
   "expenses",
   "section_break_dvzq6",
@@ -193,6 +197,28 @@
    "fieldtype": "Link",
    "label": "Default Project",
    "options": "Project"
+  },
+  {
+   "fieldname": "taxes_section",
+   "fieldtype": "Section Break",
+   "label": "Taxes"
+  },
+  {
+   "fieldname": "custom_tax_template",
+   "fieldtype": "Link",
+   "label": "Tax Template",
+   "options": "Purchase Taxes and Charges Template"
+  },
+  {
+   "fieldname": "taxes_column_break",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "custom_total_taxes_and_charges",
+   "fieldtype": "Currency",
+   "label": "Total Taxes and Charges",
+   "options": "Company:company:default_currency",
+   "read_only": 1
   },
   {
    "fieldname": "expenses_section",

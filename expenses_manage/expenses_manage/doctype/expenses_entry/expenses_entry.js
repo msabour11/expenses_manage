@@ -26,6 +26,10 @@ frappe.ui.form.on("Expenses Entry", {
 			filters: { company: frm.doc.company },
 		}));
 
+		frm.set_query("custom_tax_template", () => ({
+			filters: { company: frm.doc.company },
+		}));
+
 		frm.set_query("account_paid_to", "expenses", () => ({
 			filters: {
 				company: frm.doc.company,
@@ -77,6 +81,8 @@ frappe.ui.form.on("Expenses Entry", {
 			default_project: null,
 			multi_currency: 0,
 			exchange_rate: 1,
+			custom_tax_template: null,
+			custom_total_taxes_and_charges: 0,
 		};
 		(frm.expense_accounting_dimensions || []).forEach((dimension) => {
 			values[dimension] = null;
@@ -137,6 +143,10 @@ frappe.ui.form.on("Expenses Entry", {
 	default_project(frm) {
 		set_default_in_blank_rows(frm, "project", frm.doc.default_project);
 	},
+
+	custom_tax_template(frm) {
+		calculate_and_apply_taxes(frm);
+	},
 });
 
 frappe.ui.form.on("Expenses", {
@@ -152,11 +162,40 @@ frappe.ui.form.on("Expenses", {
 	},
 
 	expenses_remove(frm) {
-		calculate_totals(frm);
+		if (frm.doc.custom_tax_template) {
+			calculate_and_apply_taxes(frm);
+		} else {
+			calculate_totals(frm);
+		}
 	},
 
-	amount(frm) {
-		calculate_totals(frm);
+	amount(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (row.custom_tax_included && !row.custom_is_tax_row) {
+			frappe.model.set_value(cdt, cdn, "custom_gross_amount", flt(row.amount));
+			calculate_and_apply_taxes(frm);
+		} else {
+			calculate_totals(frm);
+		}
+	},
+
+	custom_tax_included(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (row.custom_is_tax_row) {
+			frappe.model.set_value(cdt, cdn, "custom_tax_included", 0);
+			return;
+		}
+
+		if (row.custom_tax_included) {
+			if (!flt(row.custom_gross_amount)) {
+				frappe.model.set_value(cdt, cdn, "custom_gross_amount", flt(row.amount));
+			}
+		} else if (flt(row.custom_gross_amount)) {
+			frappe.model.set_value(cdt, cdn, "amount", flt(row.custom_gross_amount));
+			frappe.model.set_value(cdt, cdn, "custom_gross_amount", 0);
+		}
+
+		calculate_and_apply_taxes(frm);
 	},
 });
 
@@ -196,6 +235,139 @@ function calculate_totals(frm) {
 		"paid_amount_in_account_currency",
 		frm.doc.multi_currency ? flt(total / rate) : total
 	);
+}
+
+function calculate_and_apply_taxes(frm) {
+	if (!frm.doc.custom_tax_template) {
+		restore_gross_amounts(frm);
+		frm.set_value("custom_total_taxes_and_charges", 0);
+		calculate_totals(frm);
+		return;
+	}
+
+	const request_id = (frm.expense_tax_request_id || 0) + 1;
+	const tax_template = frm.doc.custom_tax_template;
+	frm.expense_tax_request_id = request_id;
+
+	frappe.call({
+		method: "frappe.client.get",
+		args: {
+			doctype: "Purchase Taxes and Charges Template",
+			name: tax_template,
+		},
+		callback(r) {
+			if (
+				request_id !== frm.expense_tax_request_id ||
+				frm.doc.custom_tax_template !== tax_template
+			) {
+				return;
+			}
+
+			const tax_rows = ((r.message && r.message.taxes) || []).filter(
+				(tax) => flt(tax.rate) && tax.account_head
+			);
+			if (!tax_rows.length) {
+				frappe.msgprint(
+					__("Tax Template {0} has no tax lines with an account and rate.", [
+						tax_template,
+					])
+				);
+				return;
+			}
+			const total_rate = tax_rows.reduce((sum, tax) => sum + flt(tax.rate), 0);
+			if (total_rate <= -100) {
+				frappe.msgprint(__("The total tax rate must be greater than -100%."));
+				return;
+			}
+
+			frm.doc.expenses = (frm.doc.expenses || []).filter(
+				(row) => !row.custom_is_tax_row
+			);
+			let total_tax = 0;
+			const generated_rows = [];
+
+			(frm.doc.expenses || []).forEach((row) => {
+				let gross_amount = flt(row.custom_gross_amount);
+				if (!row.custom_tax_included) {
+					if (gross_amount) {
+						row.amount = gross_amount;
+						row.custom_gross_amount = 0;
+					}
+					return;
+				}
+
+				if (!gross_amount) {
+					gross_amount = flt(row.amount);
+					row.custom_gross_amount = gross_amount;
+				}
+				if (!gross_amount) {
+					return;
+				}
+
+				const amount_precision = precision("amount", row);
+				const net_amount = flt(
+					gross_amount / (1 + total_rate / 100),
+					amount_precision
+				);
+				let row_tax_total = 0;
+
+				tax_rows.forEach((tax, index) => {
+					const tax_amount =
+						index === tax_rows.length - 1
+							? flt(gross_amount - net_amount - row_tax_total, amount_precision)
+							: flt(
+									(net_amount * flt(tax.rate)) / 100,
+									amount_precision
+								);
+					if (!tax_amount) {
+						return;
+					}
+
+					row_tax_total += tax_amount;
+					total_tax += tax_amount;
+					const tax_row = {
+						account_paid_to: tax.account_head,
+						amount: tax_amount,
+						cost_center: row.cost_center || frm.doc.default_cost_center,
+						project: row.project || frm.doc.default_project,
+						remarks: `${tax.description || tax.account_head} @ ${flt(tax.rate)}%`,
+						custom_tax_included: 0,
+						custom_is_tax_row: 1,
+						custom_gross_amount: 0,
+					};
+					(frm.expense_accounting_dimensions || []).forEach((dimension) => {
+						tax_row[dimension] = row[dimension] || frm.doc[dimension];
+					});
+					generated_rows.push(tax_row);
+				});
+
+				row.amount = net_amount;
+			});
+
+			generated_rows.forEach((values) => {
+				const row = frm.add_child("expenses");
+				Object.assign(row, values);
+			});
+
+			frm.set_value(
+				"custom_total_taxes_and_charges",
+				flt(total_tax, precision("custom_total_taxes_and_charges", frm.doc))
+			);
+			frm.refresh_field("expenses");
+			calculate_totals(frm);
+		},
+	});
+}
+
+function restore_gross_amounts(frm) {
+	(frm.doc.expenses || []).forEach((row) => {
+		if (!row.custom_is_tax_row && flt(row.custom_gross_amount)) {
+			row.amount = flt(row.custom_gross_amount);
+			row.custom_gross_amount = 0;
+		}
+	});
+	frm.doc.expenses = (frm.doc.expenses || []).filter((row) => !row.custom_is_tax_row);
+	frm.refresh_field("expenses");
 }
 
 function update_exchange_rate(frm) {
