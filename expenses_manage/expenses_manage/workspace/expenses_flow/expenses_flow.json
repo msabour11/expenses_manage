@@ -44,17 +44,17 @@
    "type": "Link"
   }
  ],
- "modified": "2026-09-10 16:39:49.749365",
+ "modified": "2026-09-15 13:40:09.647417",
  "modified_by": "Administrator",
  "module": "Expenses Manage",
  "name": "Expenses Flow",
  "number_cards": [],
  "owner": "Administrator",
- "parent_page": "Accounting",
+ "parent_page": "Home",
  "public": 1,
  "quick_lists": [],
  "roles": [],
- "sequence_id": 28.0,
+ "sequence_id": 2.0,
  "shortcuts": [],
  "title": "Expenses Flow"
 }
