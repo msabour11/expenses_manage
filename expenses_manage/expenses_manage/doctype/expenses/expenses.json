@@ -10,6 +10,9 @@
   "cost_center",
   "project",
   "amount",
+  "custom_tax_included",
+  "custom_is_tax_row",
+  "custom_gross_amount",
   "remarks",
   "column_break_49agz",
   "account_currency",
@@ -54,6 +57,28 @@
    "label": "Amount",
    "options": "Company:company:default_currency",
    "reqd": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "custom_tax_included",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Tax Included"
+  },
+  {
+   "fieldname": "custom_is_tax_row",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Is Tax Row",
+   "read_only": 1
+  },
+  {
+   "fieldname": "custom_gross_amount",
+   "fieldtype": "Currency",
+   "hidden": 1,
+   "label": "Gross Amount",
+   "options": "Company:company:default_currency",
+   "read_only": 1
   },
   {
    "columns": 1,
