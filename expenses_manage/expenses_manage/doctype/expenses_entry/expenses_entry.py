@@ -13,6 +13,7 @@ from erpnext.accounts.utils import get_balance_on
 from erpnext.controllers.accounts_controller import AccountsController
 from erpnext.setup.utils import get_exchange_rate
 from frappe import _
+from frappe.query_builder import DocType
 from frappe.utils import flt
 
 
@@ -355,9 +356,7 @@ class ExpensesEntry(AccountsController):
         prefix = _("Row {0}: ").format(row_idx) if row_idx else ""
         if not project_company:
             frappe.throw(
-                _("{0}Project {1} does not exist.").format(
-                    prefix, frappe.bold(project)
-                )
+                _("{0}Project {1} does not exist.").format(prefix, frappe.bold(project))
             )
         if project_company != self.company:
             frappe.throw(
@@ -365,6 +364,47 @@ class ExpensesEntry(AccountsController):
                     prefix, frappe.bold(project), frappe.bold(self.company)
                 )
             )
+
+    def validate_company_in_accounting_dimension(self):
+        if hasattr(AccountsController, "validate_company_in_accounting_dimension"):
+            super().validate_company_in_accounting_dimension()
+            return
+
+        doc_field = DocType("DocField")
+        accounting_dimension = DocType("Accounting Dimension")
+        dimension_list = (
+            frappe.qb.from_(accounting_dimension)
+            .select(accounting_dimension.document_type)
+            .join(doc_field)
+            .on(doc_field.parent == accounting_dimension.document_type)
+            .where(doc_field.fieldname == "company")
+        ).run(as_list=True)
+
+        dimension_list = sum(dimension_list, ["Project", "Cost Center"])
+        self.validate_company(dimension_list)
+
+        for child in self.get_all_children() or []:
+            self.validate_company(dimension_list, child)
+
+    def validate_company(self, dimension_list, child=None):
+        if hasattr(AccountsController, "validate_company"):
+            super().validate_company(dimension_list, child=child)
+            return
+
+        for dimension in dimension_list:
+            if not child:
+                dimension_value = self.get(frappe.scrub(dimension))
+            else:
+                dimension_value = child.get(frappe.scrub(dimension))
+
+            if dimension_value:
+                company = frappe.get_cached_value(dimension, dimension_value, "company")
+                if company and company != self.company:
+                    frappe.throw(
+                        _("{0}: {1} does not belong to the Company: {2}").format(
+                            dimension, frappe.bold(dimension_value), self.company
+                        )
+                    )
 
     def _set_totals_and_exchange_rate(self):
         self.total_debit = flt(
