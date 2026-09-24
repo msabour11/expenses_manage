@@ -1,6 +1,5 @@
 {
  "actions": [],
- "allow_rename": 1,
  "autoname": "naming_series:",
  "creation": "2026-09-10 14:21:52.080422",
  "default_view": "List",
@@ -49,14 +48,6 @@
    "fieldname": "type_of_payment",
    "fieldtype": "Section Break",
    "label": "Type of Payment"
-  },
-  {
-   "default": "ACC-PAY-.YYYY.-",
-   "fieldname": "naming_series",
-   "fieldtype": "Select",
-   "label": "Series",
-   "options": "ACC-PAY-.YYYY.-",
-   "reqd": 1
   },
   {
    "default": "Expenses",
@@ -269,19 +260,18 @@
    "label": "Remarks"
   },
   {
-   "fieldname": "amended_from",
-   "fieldtype": "Link",
-   "label": "Amended From",
-   "no_copy": 1,
-   "options": "Expenses Entry",
-   "print_hide": 1,
-   "read_only": 1
+   "default": "ACC-EXP-.YYYY.-",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "naming series",
+   "options": "ACC-EXP-.YYYY.-\nACC-PAY-.YYYY.-",
+   "reqd": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-09-10 14:29:08.759547",
+ "modified": "2026-09-24 15:28:22.560715",
  "modified_by": "Administrator",
  "module": "Expenses Manage",
  "name": "Expenses Entry",
